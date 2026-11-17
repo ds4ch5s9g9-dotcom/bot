@@ -10,15 +10,16 @@ TOKEN = "9127173006:AAETtxdOLjsSJCwiHsw5vvMNI1NiYPtNHlQ"
 
 dp = Dispatcher()
 
-# Идеальные параметры для стабильного скачивания без блокировок
+# Идеальные параметры для скачивания YouTube и TikTok без ffmpeg
 YDL_OPTIONS = {
-    'format': 'best[ext=mp4]/best',
+    'format': 'best',
     'outtmpl': 'downloads/%(id)s.%(ext)s',
     'noplaylist': True,
     'quiet': True,
     'extractor_args': {
         'tiktok': {
-            'webpage_download': True,
+            'app_version': '35.1.1',
+            'api_hostname': 'api16-normal-c-useast1a.tiktokv.com',
         }
     },
     'http_headers': {
@@ -71,3 +72,4 @@ async def main():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     asyncio.run(main())
+
