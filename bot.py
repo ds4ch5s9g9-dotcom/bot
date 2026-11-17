@@ -6,16 +6,19 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, FSInputFile
 import yt_dlp
 
-# Токен бота уже на месте
 TOKEN = "9127173006:AAETtxdOLjsSJCwiHsw5vvMNI1NiYPtNHlQ"
 
 dp = Dispatcher()
 
+# Добавили User-Agent, чтобы TikTok не ругался на запросы
 YDL_OPTIONS = {
     'format': 'best[ext=mp4]/best',
     'outtmpl': 'downloads/%(id)s.%(ext)s',
     'noplaylist': True,
     'quiet': True,
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    }
 }
 
 @dp.message(CommandStart())
@@ -47,7 +50,7 @@ async def download_video(message: Message):
         else:
             await msg.edit_text("❌ Не получилось найти или скачать файл.")
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка при скачивании: {str(e)[:100]}")
+        await msg.edit_text(f"❌ Ошибка при скачивании: {str(e)[:150]}")
     finally:
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
