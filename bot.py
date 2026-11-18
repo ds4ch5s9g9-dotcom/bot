@@ -11,10 +11,8 @@ from config import TOKEN
 dp = Dispatcher()
 os.makedirs('downloads', exist_ok=True)
 
-# Словарь для временного хранения ссылок пользователей
 USER_URLS = {}
 
-# Клавиатура выбора формата
 def get_format_keyboard(url_key: str):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -22,7 +20,7 @@ def get_format_keyboard(url_key: str):
             InlineKeyboardButton(text="📱 Видео (720p)", callback_data=f"dl_720_{url_key}")
         ],
         [
-            InlineKeyboardButton(text="🎵 Только аудио (MP3)", callback_data=f"dl_audio_{url_key}")
+            InlineKeyboardButton(text="🎵 Аудио (MP3)", callback_data=f"dl_audio_{url_key}")
         ]
     ])
 
@@ -33,11 +31,16 @@ async def start_cmd(message: Message):
     except:
         pass
     
-    await message.answer(
-        "Привет! Я твой медиа-бот 🤖\n"
-        "Отправь мне ссылку на видео из **YouTube** или **TikTok**, и я предложу скачать его в высоком качестве или чистый MP3!\n"
-        "*(Твои сообщения со ссылками автоматически удаляются)*"
+    welcome_msg = await message.answer(
+        "🤖 **Media Downloader v3.5**\n"
+        "Отправь ссылку на YouTube или TikTok — всё остальное я сделаю сам."
     )
+    # Автоматически стираем приветствие через 10 секунд, чтобы не засорять чат
+    await asyncio.sleep(10)
+    try:
+        await welcome_msg.delete()
+    except:
+        pass
 
 @dp.message(F.text.startswith(('http://', 'https://')))
 async def handle_url(message: Message):
@@ -45,51 +48,51 @@ async def handle_url(message: Message):
     url_key = str(message.from_user.id)
     USER_URLS[url_key] = url
     
-    # Удаляем сообщение со ссылкой, чтобы не засорять чат
+    # Стираем сообщение пользователя со ссылкой
     try:
         await message.delete()
     except Exception:
         pass
     
-    await message.answer(
-        "🔗 Ссылка принята! Выбери формат файла:",
+    # Отправляем меню выбора
+    menu_msg = await message.answer(
+        "⚡️ **Выберите формат загрузки:**",
         reply_markup=get_format_keyboard(url_key)
     )
+    # Сохраняем ID сообщения с меню, чтобы потом его удалить
+    USER_URLS[f"{url_key}_msg"] = menu_msg.message_id
 
 @dp.callback_query(F.data.startswith("dl_"))
 async def process_download(callback: CallbackQuery):
     data_parts = callback.data.split("_", 2)
-    mode = data_parts[1] # best, 720, audio
+    mode = data_parts[1]
     url_key = data_parts[2]
     
     url = USER_URLS.get(url_key)
     if not url:
-        await callback.message.edit_text("❌ Ссылка устарела или не найдена. Отправь её заново.")
+        await callback.message.edit_text("❌ Ссылка устарела. Отправьте её заново.")
         return
 
-    status_msg = await callback.message.edit_text("⏳ Загружаю файл с сервера, подожди немного...")
+    status_msg = await callback.message.edit_text("🔄 **[▒▒▒▒▒▒▒▒▒▒] 0%** — Подготовка к скачиванию...")
     file_path = None
 
     try:
-        # Стопроцентно рабочий набор опций с обходом блокировок датацентров через default и web
         ydl_opts = {
             'outtmpl': 'downloads/%(id)s.%(ext)s',
             'noplaylist': True,
             'quiet': True,
             'nocheckcertificate': True,
-            'ignoreerrors': False,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['default', 'web'],
+                    'player_client': ['ios', 'web_creator'],
                 },
                 'tiktok': {
                     'webpage_download': True,
                 }
             },
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
                 'Accept-Language': 'en-US,en;q=0.9',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             }
         }
 
@@ -117,27 +120,26 @@ async def process_download(callback: CallbackQuery):
         file_path, video_title = await asyncio.to_thread(download_process)
 
         if file_path and os.path.exists(file_path):
-            safe_title = video_title[:100] if video_title else "Медиафайл"
-            if mode == "audio":
-                await callback.message.answer_audio(FSInputFile(file_path), caption=f"🎵 {safe_title}")
-            else:
-                await callback.message.answer_video(FSInputFile(file_path), caption=f"🎬 {safe_title}")
+            safe_title = video_title[:80] if video_title else "Медиафайл"
             
-            # Удаляем служебное меню бота, чтобы чат оставался чистым
+            await status_msg.edit_text("📤 **Отправка файла в чат...**")
+            
+            if mode == "audio":
+                sent_msg = await callback.message.answer_audio(FSInputFile(file_path), caption=f"🎵 {safe_title} | ✨ w1xsent bot")
+            else:
+                sent_msg = await callback.message.answer_video(FSInputFile(file_path), caption=f"🎬 {safe_title} | ✨ w1xsent bot")
+            
+            # Удаляем служебное сообщение с прогрессом
             try:
-                await callback.message.delete()
+                await status_msg.delete()
             except:
                 pass
         else:
-            await callback.message.edit_text("❌ Не удалось найти или обработать файл.")
+            await status_msg.edit_text("❌ Не удалось обработать файл.")
 
     except Exception as e:
         logging.error(f"Download error: {e}")
-        error_text = str(e)
-        if "Sign in" in error_text or "private" in error_text:
-            await status_msg.edit_text("❌ Ошибка: видео ограничено по возрасту или приватное.")
-        else:
-            await status_msg.edit_text(f"❌ Ошибка скачивания: {error_text[:140]}")
+        await status_msg.edit_text(f"❌ Ошибка: {str(e)[:120]}")
     finally:
         if file_path and os.path.exists(file_path):
             try:
@@ -145,7 +147,6 @@ async def process_download(callback: CallbackQuery):
             except:
                 pass
 
-# Веб-сервер для удержания порта на Render и работы с UptimeRobot
 async def handle(request):
     return web.Response(text="Bot is running 24/7!")
 
