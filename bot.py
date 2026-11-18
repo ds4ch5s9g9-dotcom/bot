@@ -11,7 +11,7 @@ from config import TOKEN
 dp = Dispatcher()
 os.makedirs('downloads', exist_ok=True)
 
-# Универсальные опции для TikTok и YouTube с обходом всех блокировок
+# Продвинутые параметры для обхода блокировок TikTok и YouTube
 def get_ydl_opts(mode):
     ydl_opts = {
         'outtmpl': 'downloads/%(id)s.%(ext)s',
@@ -30,6 +30,7 @@ def get_ydl_opts(mode):
             'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Referer': 'https://www.tiktok.com/',
         }
     }
 
@@ -46,13 +47,6 @@ def get_ydl_opts(mode):
         }]
     return ydl_opts
 
-# Клавиатура. Вшиваем саму ссылку прямо в callback_data, чтобы она никогда не "устаревала"!
-def get_format_keyboard(url: str):
-    # Укорачиваем или кодируем, но для безопасности передаем через префикс (Telegram позволяет до 64 байт)
-    # Сделаем безопасную передачу через хэш или сохранение
-    pass
-
-# Используем простой безопасный глобальный словарь с автоочисткой старых
 USER_URLS = {}
 
 def make_keyboard(unique_id: str):
@@ -78,17 +72,15 @@ async def handle_url(message: Message):
     url = message.text.strip()
     user_id = message.from_user.id
     
-    # Удаляем сообщение со ссылкой
     try:
         await message.delete()
     except:
         pass
     
-    # Генерируем уникальный ключ для ссылки этого пользователя
     unique_id = f"{user_id}_{abs(hash(url))}"
     USER_URLS[unique_id] = url
     
-    menu_msg = await message.answer(
+    await message.answer(
         "⚡️ **Выберите формат загрузки:**",
         reply_markup=make_keyboard(unique_id)
     )
@@ -105,7 +97,7 @@ async def process_download(callback: CallbackQuery):
 
     url = USER_URLS.get(unique_id)
     if not url:
-        await callback.message.edit_text("❌ Ссылка не найдена в памяти. Пожалуйста, отправьте её ещё раз.")
+        await callback.message.edit_text("❌ Ссылка не найдена в памяти. Отправьте её ещё раз.")
         return
 
     status_msg = await callback.message.edit_text("🔄 **[▒▒▒▒▒▒▒▒▒▒] 0%** — Загрузка с сервера...")
@@ -143,7 +135,11 @@ async def process_download(callback: CallbackQuery):
 
     except Exception as e:
         logging.error(f"Download error: {e}")
-        await status_msg.edit_text(f"❌ Ошибка: {str(e)[:120]}")
+        error_text = str(e)
+        if "status code 0" in error_text or "not available" in error_text:
+            await status_msg.edit_text("❌ TikTok временно ограничил доступ с этого сервера. Попробуйте еще раз через минуту.")
+        else:
+            await status_msg.edit_text(f"❌ Ошибка: {error_text[:120]}")
     finally:
         if file_path and os.path.exists(file_path):
             try:
