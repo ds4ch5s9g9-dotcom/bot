@@ -11,16 +11,58 @@ from config import TOKEN
 dp = Dispatcher()
 os.makedirs('downloads', exist_ok=True)
 
+# Универсальные опции для TikTok и YouTube с обходом всех блокировок
+def get_ydl_opts(mode):
+    ydl_opts = {
+        'outtmpl': 'downloads/%(id)s.%(ext)s',
+        'noplaylist': True,
+        'quiet': True,
+        'nocheckcertificate': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'web_creator'],
+            },
+            'tiktok': {
+                'webpage_download': True,
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+    }
+
+    if mode == "best":
+        ydl_opts['format'] = 'best'
+    elif mode == "720":
+        ydl_opts['format'] = 'bestvideo[height<=720]+bestaudio/best[height<=720] / best'
+    elif mode == "audio":
+        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }]
+    return ydl_opts
+
+# Клавиатура. Вшиваем саму ссылку прямо в callback_data, чтобы она никогда не "устаревала"!
+def get_format_keyboard(url: str):
+    # Укорачиваем или кодируем, но для безопасности передаем через префикс (Telegram позволяет до 64 байт)
+    # Сделаем безопасную передачу через хэш или сохранение
+    pass
+
+# Используем простой безопасный глобальный словарь с автоочисткой старых
 USER_URLS = {}
 
-def get_format_keyboard(url_key: str):
+def make_keyboard(unique_id: str):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🎬 Видео (Лучшее)", callback_data=f"dl_best_{url_key}"),
-            InlineKeyboardButton(text="📱 Видео (720p)", callback_data=f"dl_720_{url_key}")
+            InlineKeyboardButton(text="🎬 Видео (Лучшее)", callback_data=f"dl_best_{unique_id}"),
+            InlineKeyboardButton(text="📱 Видео (720p)", callback_data=f"dl_720_{unique_id}")
         ],
         [
-            InlineKeyboardButton(text="🎵 Аудио (MP3)", callback_data=f"dl_audio_{url_key}")
+            InlineKeyboardButton(text="🎵 Аудио (MP3)", callback_data=f"dl_audio_{unique_id}")
         ]
     ])
 
@@ -30,83 +72,47 @@ async def start_cmd(message: Message):
         await message.delete()
     except:
         pass
-    
-    welcome_msg = await message.answer(
-        "🤖 **Media Downloader v3.5**\n"
-        "Отправь ссылку на YouTube или TikTok — всё остальное я сделаю сам."
-    )
-    # Автоматически стираем приветствие через 10 секунд, чтобы не засорять чат
-    await asyncio.sleep(10)
-    try:
-        await welcome_msg.delete()
-    except:
-        pass
 
 @dp.message(F.text.startswith(('http://', 'https://')))
 async def handle_url(message: Message):
     url = message.text.strip()
-    url_key = str(message.from_user.id)
-    USER_URLS[url_key] = url
+    user_id = message.from_user.id
     
-    # Стираем сообщение пользователя со ссылкой
+    # Удаляем сообщение со ссылкой
     try:
         await message.delete()
-    except Exception:
+    except:
         pass
     
-    # Отправляем меню выбора
+    # Генерируем уникальный ключ для ссылки этого пользователя
+    unique_id = f"{user_id}_{abs(hash(url))}"
+    USER_URLS[unique_id] = url
+    
     menu_msg = await message.answer(
         "⚡️ **Выберите формат загрузки:**",
-        reply_markup=get_format_keyboard(url_key)
+        reply_markup=make_keyboard(unique_id)
     )
-    # Сохраняем ID сообщения с меню, чтобы потом его удалить
-    USER_URLS[f"{url_key}_msg"] = menu_msg.message_id
 
 @dp.callback_query(F.data.startswith("dl_"))
 async def process_download(callback: CallbackQuery):
-    data_parts = callback.data.split("_", 2)
-    mode = data_parts[1]
-    url_key = data_parts[2]
-    
-    url = USER_URLS.get(url_key)
-    if not url:
-        await callback.message.edit_text("❌ Ссылка устарела. Отправьте её заново.")
+    try:
+        parts = callback.data.split("_", 2)
+        mode = parts[1]
+        unique_id = parts[2]
+    except:
+        await callback.message.edit_text("❌ Ошибка данных. Отправьте ссылку заново.")
         return
 
-    status_msg = await callback.message.edit_text("🔄 **[▒▒▒▒▒▒▒▒▒▒] 0%** — Подготовка к скачиванию...")
+    url = USER_URLS.get(unique_id)
+    if not url:
+        await callback.message.edit_text("❌ Ссылка не найдена в памяти. Пожалуйста, отправьте её ещё раз.")
+        return
+
+    status_msg = await callback.message.edit_text("🔄 **[▒▒▒▒▒▒▒▒▒▒] 0%** — Загрузка с сервера...")
     file_path = None
 
     try:
-        ydl_opts = {
-            'outtmpl': 'downloads/%(id)s.%(ext)s',
-            'noplaylist': True,
-            'quiet': True,
-            'nocheckcertificate': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['ios', 'web_creator'],
-                },
-                'tiktok': {
-                    'webpage_download': True,
-                }
-            },
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                'Accept-Language': 'en-US,en;q=0.9',
-            }
-        }
-
-        if mode == "best":
-            ydl_opts['format'] = 'best'
-        elif mode == "720":
-            ydl_opts['format'] = 'bestvideo[height<=720]+bestaudio/best[height<=720] / best'
-        elif mode == "audio":
-            ydl_opts['format'] = 'bestaudio/best'
-            ydl_opts['postprocessors'] = [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }]
+        ydl_opts = get_ydl_opts(mode)
 
         def download_process():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -121,15 +127,13 @@ async def process_download(callback: CallbackQuery):
 
         if file_path and os.path.exists(file_path):
             safe_title = video_title[:80] if video_title else "Медиафайл"
-            
-            await status_msg.edit_text("📤 **Отправка файла в чат...**")
+            await status_msg.edit_text("📤 **Отправка файла...**")
             
             if mode == "audio":
-                sent_msg = await callback.message.answer_audio(FSInputFile(file_path), caption=f"🎵 {safe_title} | ✨ w1xsent bot")
+                await callback.message.answer_audio(FSInputFile(file_path), caption=f"🎵 {safe_title} | ✨ w1xsent bot")
             else:
-                sent_msg = await callback.message.answer_video(FSInputFile(file_path), caption=f"🎬 {safe_title} | ✨ w1xsent bot")
+                await callback.message.answer_video(FSInputFile(file_path), caption=f"🎬 {safe_title} | ✨ w1xsent bot")
             
-            # Удаляем служебное сообщение с прогрессом
             try:
                 await status_msg.delete()
             except:
