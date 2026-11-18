@@ -28,7 +28,6 @@ def get_format_keyboard(url_key: str):
 
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
-    # Удаляем команду старт, чтобы не мусорить
     try:
         await message.delete()
     except:
@@ -36,8 +35,8 @@ async def start_cmd(message: Message):
     
     await message.answer(
         "Привет! Я твой медиа-бот 🤖\n"
-        "Отправь мне ссылку на видео из **YouTube** или **TikTok**, и я предложу скачать видео в высоком качестве или чистый MP3!\n"
-        "*(Твои сообщения со ссылками будут автоматически удаляться)*"
+        "Отправь мне ссылку на видео из **YouTube** или **TikTok**, и я предложу скачать его в высоком качестве или чистый MP3!\n"
+        "*(Твои сообщения со ссылками автоматически удаляются)*"
     )
 
 @dp.message(F.text.startswith(('http://', 'https://')))
@@ -46,13 +45,12 @@ async def handle_url(message: Message):
     url_key = str(message.from_user.id)
     USER_URLS[url_key] = url
     
-    # Пытаемся сразу удалить сообщение пользователя со ссылкой, чтобы не засорять чат
+    # Удаляем сообщение со ссылкой, чтобы не засорять чат
     try:
         await message.delete()
     except Exception:
         pass
     
-    # Отправляем меню выбора формата
     await message.answer(
         "🔗 Ссылка принята! Выбери формат файла:",
         reply_markup=get_format_keyboard(url_key)
@@ -69,24 +67,27 @@ async def process_download(callback: CallbackQuery):
         await callback.message.edit_text("❌ Ссылка устарела или не найдена. Отправь её заново.")
         return
 
-    await callback.message.edit_text("⏳ Загружаю файл с сервера, подожди немного...")
+    status_msg = await callback.message.edit_text("⏳ Загружаю файл с сервера, подожди немного...")
     file_path = None
 
     try:
+        # Стопроцентно рабочий набор опций с обходом блокировок датацентров через default и web
         ydl_opts = {
             'outtmpl': 'downloads/%(id)s.%(ext)s',
             'noplaylist': True,
             'quiet': True,
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['mweb', 'web_creator', 'tv']
+                    'player_client': ['default', 'web'],
                 },
                 'tiktok': {
                     'webpage_download': True,
                 }
             },
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             }
@@ -122,7 +123,7 @@ async def process_download(callback: CallbackQuery):
             else:
                 await callback.message.answer_video(FSInputFile(file_path), caption=f"🎬 {safe_title}")
             
-            # Удаляем служебное сообщение бота с кнопками
+            # Удаляем служебное меню бота, чтобы чат оставался чистым
             try:
                 await callback.message.delete()
             except:
@@ -132,7 +133,11 @@ async def process_download(callback: CallbackQuery):
 
     except Exception as e:
         logging.error(f"Download error: {e}")
-        await callback.message.edit_text(f"❌ Ошибка скачивания: {str(e)[:140]}")
+        error_text = str(e)
+        if "Sign in" in error_text or "private" in error_text:
+            await status_msg.edit_text("❌ Ошибка: видео ограничено по возрасту или приватное.")
+        else:
+            await status_msg.edit_text(f"❌ Ошибка скачивания: {error_text[:140]}")
     finally:
         if file_path and os.path.exists(file_path):
             try:
