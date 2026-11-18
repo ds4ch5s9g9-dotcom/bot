@@ -29,8 +29,8 @@ def get_format_keyboard(url_key: str):
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
     await message.answer(
-        "Привет! Я w1xsent loader bot 🤖\n"
-        "Отправь мне ссылку на видео из YouTube или TikTok, и я предложу выбрать качество или скачать только звук!"
+        "Привет! Я твой медиа-бот 🤖\n"
+        "Отправь мне ссылку на видео из **YouTube** или **TikTok**, и я предложу выбрать качество или скачать чистый звук в MP3!"
     )
 
 @dp.message(F.text.startswith(('http://', 'https://')))
@@ -40,7 +40,7 @@ async def handle_url(message: Message):
     USER_URLS[url_key] = url
     
     await message.answer(
-        "🔗 Ссылка принята! Что именно нужно сделать?",
+        "🔗 Ссылка успешно принята! Выбери, в каком формате отправить файл:",
         reply_markup=get_format_keyboard(url_key)
     )
 
@@ -52,10 +52,10 @@ async def process_download(callback: CallbackQuery):
     
     url = USER_URLS.get(url_key)
     if not url:
-        await callback.message.edit_text("❌ Ссылка устарела или не найдена. Отправь её заново.")
+        await callback.message.edit_text("❌ Ссылка устарела или не найдена. Отправь её заново в чат.")
         return
 
-    await callback.message.edit_text("⏳ Загружаю файл, подожди немного...")
+    status_msg = await callback.message.edit_text("⏳ Загружаю файл с сервера, подожди немного...")
     file_path = None
 
     try:
@@ -64,7 +64,7 @@ async def process_download(callback: CallbackQuery):
             'noplaylist': True,
             'quiet': True,
             'extractor_args': {
-                'youtube': {'player_client': ['ios', 'web']},
+                'youtube': {'player_client': ['android', 'web']},
                 'tiktok': {'webpage_download': True}
             },
             'http_headers': {
@@ -91,21 +91,24 @@ async def process_download(callback: CallbackQuery):
                 filename = ydl.prepare_filename(info)
                 if mode == "audio":
                     filename = os.path.splitext(filename)[0] + ".mp3"
-                return filename
+                title = info.get('title', 'video')
+                return filename, title
 
-        file_path = await asyncio.to_thread(download_process)
+        file_path, video_title = await asyncio.to_thread(download_process)
 
         if file_path and os.path.exists(file_path):
+            safe_title = video_title[:100] if video_title else "Медиафайл"
             if mode == "audio":
-                await callback.message.answer_audio(FSInputFile(file_path))
+                await callback.message.answer_audio(FSInputFile(file_path), caption=f"🎵 {safe_title}")
             else:
-                await callback.message.answer_video(FSInputFile(file_path))
-            await callback.message.delete()
+                await callback.message.answer_video(FSInputFile(file_path), caption=f"🎬 {safe_title}")
+            await status_msg.delete()
         else:
-            await callback.message.edit_text("❌ Не удалось найти или обработать файл.")
+            await status_msg.edit_text("❌ Не удалось найти или обработать файл.")
 
     except Exception as e:
-        await callback.message.edit_text(f"❌ Ошибка скачивания: {str(e)[:150]}")
+        logging.error(f"Download error: {e}")
+        await status_msg.edit_text(f"❌ Ошибка скачивания: {str(e)[:140]}")
     finally:
         if file_path and os.path.exists(file_path):
             try:
